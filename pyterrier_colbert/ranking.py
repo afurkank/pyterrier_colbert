@@ -222,7 +222,7 @@ class ColBERTModelOnlyFactory():
         args.bsize = 128
         args.similarity = 'cosine'        
         args.amp = True
-        args.nprobe = 10
+        args.nprobe = 10 #### THIS IS THE NUMBER OF CLUSTERS SEARCHED
         args.part_range = None
         args.mask_punctuation = mask_punctuation
 
@@ -414,16 +414,79 @@ class ColBERTModelOnlyFactory():
         cuda0 = torch.device('cuda') if gpu else torch.device('cpu')
 
         def _build_interaction(row, D):
+            """
+            Builds the interaction matrix by copying document embeddings to the interaction matrix.
+
+            Args:
+                row (object): The row object containing document embeddings.
+                D (ndarray): The interaction matrix.
+
+            Returns:
+                None
+            """
             doc_embs = row.doc_embs
             doc_len = doc_embs.shape[0]
             D[row.row_index, 0:doc_len, :] = doc_embs
             
         def _build_toks(row, idsD):
+            """
+            Build tokens for a document and store them in the idsD array.
+
+            Args:
+                row (object): The row object containing the document tokens.
+                idsD (ndarray): The array to store the document tokens.
+
+            Returns:
+                None
+            """
             doc_toks = row.doc_toks
             doc_len = doc_toks.shape[0]
             idsD[row.row_index, 0:doc_len] = doc_toks
         
         def _score_query(df):
+            """
+            Scores the query embeddings against the document embeddings in the given DataFrame.
+
+            Args:
+                df (pandas.DataFrame): DataFrame containing query and document embeddings.
+
+            Returns:
+                pandas.DataFrame: DataFrame with scores and additional columns if specified.
+
+            Scores similarity between a query and multiple documents.
+
+            df contains multiple rows, each corresponding to a document. Each row contains 
+            the embeddings for that document, as well as the embeddings for a query
+            
+            The query embeddings are retrieved with df.iloc[0].query_embs, 
+            same query is used for all documents in the DataFrame
+
+            The function first concatenates the query embeddings into a tensor Q. If the 
+            DataFrame contains query weights, these are also retrieved; otherwise, a tensor 
+            of ones is used as the weights. If a GPU is available, the query embeddings and 
+            weights are moved to the GPU.
+
+            Next, a 3D tensor D is created to hold the document embeddings. Each row of D 
+            corresponds to a document and is populated with the document's embeddings 
+            by the _build_interaction function.
+
+            The function then computes the maximum score for each document by taking the 
+            dot product of the query embeddings and the document embeddings, and taking 
+            the maximum value over the second dimension. This results in a tensor of maximum 
+            scores, one for each document.
+
+            The final scores are computed by multiplying the maximum scores by the query 
+            weights and summing over the first dimension. These scores are then added to 
+            the DataFrame as a new column.
+
+            If the add_contributions flag is set, the function also computes the contributions 
+            of each token in the query to the score and adds these to the DataFrame as a new column.
+
+            If the add_exact_match_contribution flag is set, the function also builds a 
+            tensor of token ids for the documents and computes a mask indicating which 
+            tokens in the query are not special tokens (such as MASK tokens). This could 
+            be used later to compute the contribution of exact matches to the score.
+            """
             with torch.no_grad():
                 weightsQ = None
                 Q = torch.cat([df.iloc[0].query_embs])
@@ -435,12 +498,20 @@ class ColBERTModelOnlyFactory():
                     Q = Q.cuda()
                     weightsQ = weightsQ.cuda()        
                 D = torch.zeros(len(df), factory.args.doc_maxlen, factory.args.dim, device=cuda0)
+                # D: (num_documents, doc_len, emb_dim)
+                # D: (N, 180, 128)
                 df['row_index'] = range(len(df))
                 if verbose:
                     pt.tqdm.pandas(desc='scorer')
                     df.progress_apply(lambda row: _build_interaction(row, D), axis=1)
                 else:
                     df.apply(lambda row: _build_interaction(row, D), axis=1)
+                # Q: (query_len, emb_dim)
+                # Q: (32, 128)
+
+                # Q @ D.permute(0,2,1) = (32, 128) x (N, 128, 180) = (N, 32, 180)
+                # maxscoreQ = (N, 32, )
+                # scores = (N, )
                 maxscoreQ = (Q @ D.permute(0, 2, 1)).max(2).values
                 scores = (weightsQ*maxscoreQ).sum(1).cpu()
                 df["score"] = scores.tolist()
@@ -542,7 +613,7 @@ class ColBERTFactory(ColBERTModelOnlyFactory):
     # allows a colbert index to be built from a dataset
     def from_dataset(dataset : Union[str,Dataset], 
             variant : str = None, 
-            version='latest',            
+            version='latest',
             **kwargs):
         
         from pyterrier.batchretrieve import _from_dataset
@@ -791,17 +862,13 @@ class ColBERTFactory(ColBERTModelOnlyFactory):
         
         # global positions of this tokenid in the entire index
         offsets = (nn_term.emb2tid == tokenid).nonzero()
-        
         # apply sampling if requested
         if sample is not None:
             offsets = offsets[self.rng.integers(0, len(offsets), int(sample * len(offsets)))]
-        
         # get offsets partitioned by index shard
         partitioned_offsets = partition(offsets, self.segment_starts)            
-        
         # get the requested embeddings
         all_tensors = [ rrm.part_mmap[shard].mmap[shard_portion - self.segment_starts[shard]] for shard, shard_portion in enumerate(partitioned_offsets) if shard_portion.shape[0] > 0 ]
-
         # if requested, make a single tensor - involves a further copy
         if flatten:
             all_tensors = torch.cat(all_tensors).squeeze()
@@ -809,6 +876,9 @@ class ColBERTFactory(ColBERTModelOnlyFactory):
 
     def end_to_end(self) -> pt.Transformer:
         """
+
+        ------------ VANILLA COLBERT ----------------
+
         Returns a transformer composition that uses a ColBERT FAISS index to retrieve documents, followed by a ColBERT index 
         to perform accurate scoring of the retrieved documents. Equivalent to `colbertfactory.set_retrieve() >> colbertfactory.index_scorer()`.
         """
@@ -818,10 +888,8 @@ class ColBERTFactory(ColBERTModelOnlyFactory):
 
     def ann_retrieve_score(self, batch=False, query_encoded=False, faiss_depth=1000, verbose=False, maxsim=True, add_ranks=True, add_docnos=True, num_qembs_hint=32) -> pt.Transformer:
         """
-        Like set_retrieve(), uses the ColBERT FAISS index to retrieve documents, but scores them using the maxsim on the approximate
-        (quantised) nearest neighbour scores. 
-
-        This method was first proposed in our CIKM 2021 paper.
+        ------------ UPDATED COLBERT ----------------
+        Like set_retrieve(), uses the ColBERT FAISS index to retrieve documents, but scores them using the maxsim on the approximate (quantised) nearest neighbour scores. 
 
         Parameters:
         - batch(bool): whether to process all queries at once. True not currently supported.
@@ -833,21 +901,11 @@ class ColBERTFactory(ColBERTModelOnlyFactory):
         - add_docnos(bool):  Whether to use add the docno column. Default is True. Response time will be enhanced if False.
 
         Reference:
-        
         C. Macdonald, N. Tonellotto. On Approximate Nearest Neighbour Selection for Multi-Stage Dense Retrieval
         In Proceedings of ICTIR CIKM.
         """
-        #input: qid, query
-        #OR
-        #input: qid, query, query_embs, query_toks, query_weights
-
-        #output: qid, query, docid, [docno], score, [rank]
-        #OR
-        #output: qid, query, query_embs, query_toks, query_weights, docid, [docno], score, [rank]
         assert not batch, "batching not supported yet"
         assert hasattr(self._faiss_index(), 'faiss_index'), "multi index support removed"
-          # all_scores, all_embedding_ids = self._faiss_index().search(Q_cpu_numpy, faiss_depth, verbose=verbose)
-          # pids = np.searchsorted(self.faiss_index.doc_offsets, embedding_ids, side='right') - 1
         assert maxsim, "only maxsim supported now."
 
         # this is a big malloc, sized for the number of docs in the collection
@@ -951,41 +1009,6 @@ class ColBERTFactory(ColBERTModelOnlyFactory):
             rtr = rtr >> pt.apply.by_query(_get_tok_ids, add_ranks=False)
         return rtr
 
-    def prf(pytcolbert, rerank, fb_docs=3, fb_embs=10, beta=1.0, k=24) -> pt.Transformer:
-        """
-        Returns a pipeline for ColBERT PRF, either as a ranker, or a re-ranker. Final ranking is cutoff at 1000 docs.
-    
-        Parameters:
-         - rerank(bool): Whether to rerank the initial documents, or to perform a new set retrieve to gather new documents.
-         - fb_docs(int): Number of passages to use as feedback. Defaults to 3. 
-         - k(int): Number of clusters to apply on the embeddings of the top K documents. Defaults to 24.
-         - fb_embs(int): Number of expansion embeddings to add to the query. Defaults to 10.
-         - beta(float): Weight of the new embeddings compared to the original emebddings. Defaults to 1.0.
-
-        Reference:
-        
-        X. Wang, C. Macdonald, N. Tonellotto, I. Ounis. Pseudo-Relevance Feedback for Multiple Representation Dense Retrieval. 
-        In Proceedings of ICTIR 2021.
-        
-        """
-        #input: qid, query, 
-        #output: qid, query, query_embs, query_toks, query_weights, docno, rank, score
-        dense_e2e = pytcolbert.set_retrieve() >> pytcolbert.index_scorer(query_encoded=True, add_ranks=True, batch_size=10000)
-        if rerank:
-            prf_pipe = (
-                dense_e2e  
-                >> ColbertPRF(pytcolbert, k=k, fb_docs=fb_docs, fb_embs=fb_embs, beta=beta, return_docs=True)
-                >> (pytcolbert.index_scorer(query_encoded=True, add_ranks=True, batch_size=5000) %1000)
-            )
-        else:
-            prf_pipe = (
-                dense_e2e  
-                >> ColbertPRF(pytcolbert, k=k, fb_docs=fb_docs, fb_embs=fb_embs, beta=beta, return_docs=False)
-                >> pytcolbert.set_retrieve(query_encoded=True)
-                >> (pytcolbert.index_scorer(query_encoded=True, add_ranks=True, batch_size=5000) % 1000)
-            )
-        return prf_pipe
-
     def explain_doc(self, query : str, doc : Union[str,int]):
         """
         Provides a diagram explaining the interaction between a query and a given docno
@@ -999,169 +1022,51 @@ class ColBERTFactory(ColBERTModelOnlyFactory):
         embsD = self._rrm().get_embedding(pid)
         idsD = self.nn_term().get_tokens_for_doc(pid)
         return self._explain(query, embsD, idsD)
-    
 
 import pandas as pd
 
-class ColbertPRF(pt.Transformer):
-    def __init__(self, pytcfactory, k, fb_embs, beta=1, r = 42, return_docs = False, fb_docs=10,  *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.k = k
-        self.fb_embs = fb_embs
-        self.beta = beta
-        self.return_docs = return_docs
-        self.fb_docs = fb_docs
-        self.pytcfactory = pytcfactory
-        self.fnt = pytcfactory.nn_term(df=True)
-        self.r = r
-        import torch
-        import numpy as np
-        num_docs = self.fnt.num_docs
-        self.idfdict = {}
-        for tid in pt.tqdm(range(self.fnt.inference.query_tokenizer.tok.vocab_size)):
-            df = self.fnt.getDF_by_id(tid)
-            idfscore = np.log((1.0+num_docs)/(df+1))
-            self.idfdict[tid] = idfscore
-        assert self.k > self.fb_embs ,"fb_embs should be smaller than number of clusters"
-        self._init_clustering()
-
-    def _init_clustering(self):
-        import sklearn
-        from packaging.version import Version
-        from warnings import warn
-        if Version(sklearn.__version__) > Version('0.23.2'):
-            warn("You have sklearn version %s - sklearn KMeans clustering changed in 0.24, so performance may differ from those reported in the ICTIR 2021 paper, which used 0.23.2. "
-            "See also https://github.com/scikit-learn/scikit-learn/issues/19990" % str(sklearn.__version__))
-
-    def _get_centroids(self, prf_embs):
-        from sklearn.cluster import KMeans
-        kmn = KMeans(self.k, random_state=self.r)
-        kmn.fit(prf_embs)
-        return np.float32(kmn.cluster_centers_)
-        
-    def transform_query(self, topic_and_res : pd.DataFrame) -> pd.DataFrame:
-        topic_and_res = topic_and_res.sort_values('rank')
-        if 'doc_embs' in topic_and_res.columns:
-            prf_embs = torch.cat(topic_and_res.head(self.fb_docs).doc_embs.tolist())
-        else:
-            prf_embs = torch.cat([self.pytcfactory.rrm.get_embedding(docid) for docid in topic_and_res.head(self.fb_docs).docid.values])
-        
-        # perform clustering on the document embeddings to identify the representative embeddings
-        centroids = self._get_centroids(prf_embs)
-        
-        # get the most likely tokens for each centroid        
-        toks2freqs = self.fnt.get_nearest_tokens_for_embs(centroids)
-
-        # rank the clusters by descending idf
-        emb_and_score = []
-        for cluster, tok2freq in zip(range(self.k),toks2freqs):
-            if len(tok2freq) == 0:
-                continue
-            most_likely_tok = max(tok2freq, key=tok2freq.get)
-            tid = self.fnt.inference.query_tokenizer.tok.convert_tokens_to_ids(most_likely_tok)
-            emb_and_score.append( (centroids[cluster], most_likely_tok, tid, self.idfdict[tid]) ) 
-        sorted_by_second = sorted(emb_and_score, key=lambda tup: -tup[3])
-        
-
-       # build up the new dataframe columns
-        toks=[]
-        scores=[]
-        exp_embds = []
-        for i in range(min(self.fb_embs, len(sorted_by_second))):
-            emb, tok, tid, score = sorted_by_second[i]
-            toks.append(tok)
-            scores.append(score)
-            exp_embds.append(emb)
-        
-        first_row = topic_and_res.iloc[0]
-        
-        # concatenate the new embeddings to the existing query embeddings 
-        newemb = torch.cat([
-            first_row.query_embs, 
-            torch.Tensor(exp_embds)])
-        
-        # the weights column defines important of each query embedding
-        weights = torch.cat([ 
-            torch.ones(len(first_row.query_embs)),
-            self.beta * torch.Tensor(scores)]
-        )
-        
-        # generate the revised query dataframe row
-        rtr = pd.DataFrame([
-            [first_row.qid, 
-             first_row.query, 
-             newemb, 
-             toks, 
-             weights ]
-            ],
-            columns=["qid", "query", "query_embs", "query_toks", "query_weights"])
-        return rtr
-
-    def transform(self, topics_and_docs : pd.DataFrame) -> pd.DataFrame:
-        # validation of the input
-        required = ["qid", "query", "docno", "query_embs", "rank"]
-        for col in required:
-            if not col in topics_and_docs.columns:
-                raise KeyError("Input missing column %s, found %s" % (col, str(list(topics_and_docs.columns))) )
-        
-        #restore the docid column if missing
-        if "docid" not in topics_and_docs.columns and "doc_embs" not in topics_and_docs.columns:
-            topics_and_docs = self.pytcfactory._add_docids(topics_and_docs)
-        
-        rtr = []
-        for qid, res in topics_and_docs.groupby("qid"):
-            new_query_df = self.transform_query(res)     
-            if self.return_docs:
-                rtr_cols = ["qid"]
-                for col in ["doc_embs", "doc_toks", "docid", "docno"]:
-                    if col in res.columns:
-                        rtr_cols.append(col)
-                new_query_df = res[rtr_cols].merge(new_query_df, on=["qid"])
-                
-            rtr.append(new_query_df)
-        return pd.concat(rtr)
-
-
 def _approx_maxsim_numpy(faiss_scores, faiss_ids, mapping, weights, score_buffer):
+    """
+    Compute the approximate maximum similarity scores for each query-document pair using numpy.
+
+    Args:
+        faiss_scores: a 2D numpy array where each row corresponds to a query and each column corresponds to a document. The entries in this array are the similarity scores between the queries and documents as computed by the FAISS index.
+        
+        faiss_ids: a 2D numpy array with the same shape as faiss_scores. The entries in this array are the ids of the documents in the FAISS index.
+        
+        mapping: a 1D numpy array that maps the ids in the FAISS index to the ids in the original document collection.
+        
+        weights: a 1D numpy array that contains the weights for each query.
+        
+        score_buffer: a 2D numpy array that is used to store the maximum similarity scores. The rows in this array correspond to the documents and the columns correspond to the queries.
+
+    Returns:
+        tuple: A tuple containing the unique document IDs and the final similarity scores.
+    """
     import numpy as np
+    # faiss_depth: the number of documents returned by the FAISS index for each query
     faiss_depth = faiss_scores.shape[1]
+    # pids: mapping the document ids returned by the FAISS index to the ids in the original document collection
     pids = mapping[faiss_ids]
+    # qemb_ids: ids of the queries
     qemb_ids = np.arange(faiss_ids.shape[0])
+    """
+    iterate over the ranks of the documents returned by the FAISS index
+    
+    for each rank, update the score_buffer to contain the maximum similarity 
+    score for each query and document pair
+    """
     for rank in range(faiss_depth):
         rank_pids = pids[:, rank]
         score_buffer[rank_pids, qemb_ids] = np.maximum(score_buffer[rank_pids, qemb_ids], faiss_scores[:, rank])
-    all_pids = np.unique(pids)
+    
+    all_pids = np.unique(pids) # ids of the processed documents
+    """
+    compute the final scores by summing the maximum similarity scores 
+    for each document, weighted by the query weights
+    """
     final = np.sum(score_buffer[all_pids, : ] * weights, axis=1)
+    # reset the score_buffer for the processed documents to zero
     score_buffer[all_pids, : ] = 0
+
     return all_pids, final
-
-def _approx_maxsim_defaultdict(all_scores, all_embedding_ids, mapping, qweights, ignore2):
-    from collections import defaultdict
-    pid2score = defaultdict(float)
-
-    # dont rely on ids.shape here for the number of query embeddings in the query
-    for qpos in range(all_scores.shape[0]):
-        scores = all_scores[qpos]
-        embedding_ids = all_embedding_ids[qpos]
-        pids = mapping[embedding_ids]
-        qpos_scores = defaultdict(float)
-        for (score, pid) in zip(scores, pids):
-            _pid = int(pid)
-            qpos_scores[_pid] = max(qpos_scores[_pid], score)
-        for (pid, score) in qpos_scores.items():
-            pid2score[pid] += score * qweights[ qpos].item()
-    return list(pid2score.keys()), list(pid2score.values())
-
-def _approx_maxsim_sparse(all_scores, all_embedding_ids, mapping, qweights, ignore2):
-    from scipy.sparse import csr_matrix
-    import numpy as np
-    index_size = 9_000_000 # TODO: use total # of documents here instead of hardcoding
-    num_qembs = all_scores.shape[0]
-    faiss_depth = all_scores.shape[1]
-    all_pids = mapping[all_embedding_ids]
-
-    pid2score = csr_matrix((1, index_size))
-    for qpos in range( num_qembs ):
-        a = csr_matrix((all_scores[qpos], (np.arange(faiss_depth), all_pids[qpos])), shape=(faiss_depth, index_size))
-        pid2score += a.max(axis=0) * qweights[qpos]
-    return (pid2score.indices, pid2score.data)

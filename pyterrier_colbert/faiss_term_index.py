@@ -29,7 +29,6 @@ class Object(object):
     pass
 
 class FaissNNTerm():
-
     def __init__(self, colbert, index_root, index_name, nprobe=10, partitions=None, part_range=None, query_maxlen=32, faiss_index=None, cf=True, df=False, mask_punctuation=False):
         if type(colbert) == str:
             args = Object()
@@ -45,7 +44,7 @@ class FaissNNTerm():
 
         index_path = os.path.join(index_root, index_name)
         if faiss_index is None:
-            faiss_name = None 
+            faiss_name = None
             if faiss_name is not None:
                 faiss_index_path = os.path.join(index_path, faiss_name)
             else:
@@ -77,6 +76,8 @@ class FaissNNTerm():
         print_message("#> Building the emb2tid mapping..")
         self.emb2tid = load_tokenids(index_path)
         print(len(self.emb2tid))
+
+        self.pt_files_path = os.path.join(index_root, index_name)
         
         self.tok = self.inference.query_tokenizer.tok
         vocab_size = self.tok.vocab_size
@@ -112,7 +113,6 @@ class FaissNNTerm():
                 self.dfs = dfs
                 torch.save(dfs, dfs_file)
 
-    
     def get_tokens_for_doc(self, pid):
         """
         Returns the actual indexed tokens within a given document
@@ -145,6 +145,21 @@ class FaissNNTerm():
                 rtr[token] = freq
             rtrs.append(rtr)
         return rtrs
+    
+    def get_distances_and_labels_for_embs(self, embs: np.array, k=10, low_tf=0):
+        """
+        Returns the 
+        """
+        assert len(embs.shape) == 2
+
+        #D, I = self.faiss_index.faiss_index.search(embs, k=k)
+        pass
+
+    def get_centroids(self, embs: np.array, k=10, low_tf=0):
+        """
+        Returns the centroids
+        """
+        pass
 
     def get_nearest_tokens_for_emb(self, emb : np.array, k=10, low_tf=0):
         """
@@ -195,7 +210,6 @@ class FaissNNTerm():
         #ids = self.faiss_index.queries_to_embedding_ids(k, qembs)
         scores, ids = self.faiss_index.faiss_index.search(qembs[0].cpu().numpy(), k=k)
         if by_term:
-            
             for (tScores, id_set, src_id) in zip(scores, ids, input_ids[0]):
                 token = self.inference.query_tokenizer.tok.decode([src_id])
                 print(token)
@@ -222,5 +236,3 @@ class FaissNNTerm():
                 if n > 0 and count == n:
                     break
             print(rtr)
-            
-
