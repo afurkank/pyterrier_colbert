@@ -259,7 +259,7 @@ class CollectionEncoder_Generator(CollectionEncoder):
 
 
 class ColBERTIndexer(pt.Indexer):
-    def __init__(self, checkpoint, index_root, index_name, chunksize, partitions=None, prepend_title=False, num_docs=None, ids=True, gpu=True, mask_punctuation=False):
+    def __init__(self, checkpoint, index_root, index_name, chunksize, num_partitions=None, prepend_title=False, num_docs=None, ids=True, gpu=True, mask_punctuation=False):
         args = Object()
         args.similarity = 'cosine'
         args.dim = 128
@@ -278,7 +278,7 @@ class ColBERTIndexer(pt.Indexer):
         args.input_arguments = copy.deepcopy(args)
         args.nranks, args.distributed = distributed.init(args.rank)
         self.saver_queue = queue.Queue(maxsize=3)
-        args.partitions = partitions
+        args.partitions = num_partitions
         args.prepend_title = False
         self.args = args
         self.args.sample = None
@@ -345,14 +345,10 @@ class ColBERTIndexer(pt.Indexer):
 
         if self.args.partitions is None:
             self.args.partitions = 1 << math.ceil(math.log2(8 * math.sqrt(num_embeddings)))
-            warn("You did not specify --partitions!")
-            warn("Default computation chooses", self.args.partitions,
-                        "partitions (for {} embeddings)".format(num_embeddings))
         index_faiss(self.args)
         print("#> Faiss encoding complete")
         endtime = timer()
         print("#> Indexing complete, Time elapsed %0.2f seconds" % (endtime - starttime))
-        
         
 class CollectionEncoderIds(CollectionEncoder_Generator):
     def _encode_batch(self, batch_idx, batch):
