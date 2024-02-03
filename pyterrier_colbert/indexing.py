@@ -259,7 +259,7 @@ class CollectionEncoder_Generator(CollectionEncoder):
 
 
 class ColBERTIndexer(pt.Indexer):
-    def __init__(self, checkpoint, index_root, index_name, chunksize, prepend_title=False, num_docs=None, ids=True, gpu=True, mask_punctuation=False):
+    def __init__(self, checkpoint, index_root, index_name, chunksize, partitions=None, prepend_title=False, num_docs=None, ids=True, gpu=True, mask_punctuation=False):
         args = Object()
         args.similarity = 'cosine'
         args.dim = 128
@@ -278,7 +278,7 @@ class ColBERTIndexer(pt.Indexer):
         args.input_arguments = copy.deepcopy(args)
         args.nranks, args.distributed = distributed.init(args.rank)
         self.saver_queue = queue.Queue(maxsize=3)
-        args.partitions = 100
+        args.partitions = partitions
         args.prepend_title = False
         self.args = args
         self.args.sample = None
@@ -325,7 +325,7 @@ class ColBERTIndexer(pt.Indexer):
                 l["docid"] = docid
                 docnos.append(l['docno'])
                 docid+=1
-                yield l              
+                yield l
         self.args.generator = convert_gen(iterator)
         ceg = CollectionEncoderIds(self.args,0,1) if self.ids else CollectionEncoder_Generator(self.args,0,1)
 
@@ -333,7 +333,7 @@ class ColBERTIndexer(pt.Indexer):
         create_directory(self.args.index_path)
         ceg.encode()
         self.colbert = ceg.colbert
-        self.checkpoint = ceg.checkpoint 
+        self.checkpoint = ceg.checkpoint
 
         assert os.path.exists(self.args.index_path), self.args.index_path
         num_embeddings = sum(load_doclens(self.args.index_path))
