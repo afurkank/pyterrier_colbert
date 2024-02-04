@@ -689,8 +689,9 @@ class ColBERTFactory(ColBERTModelOnlyFactory):
         from colbert.ranking.faiss_index import FaissIndex
         if self.faiss_index is not None:
             return self.faiss_index
-        faiss_index_pattern = get_faiss_index_name(self.args)  # This should return something like 'ivfpq'
-        faiss_index_files = glob.glob(os.path.join(self.index_path, f"{faiss_index_pattern}.*.faiss"))
+        faiss_index_pattern = get_faiss_index_name(self.args)  # This should return something like 'ivfpq.faiss'
+        index_name = faiss_index_pattern.split('.')[0]
+        faiss_index_files = glob.glob(os.path.join(self.index_path, f"{index_name}.*.faiss"))
         print(faiss_index_files)
         if not faiss_index_files:
             raise ValueError(f"No FAISS index found matching pattern {faiss_index_pattern}.*.faiss in {self.index_path}")
