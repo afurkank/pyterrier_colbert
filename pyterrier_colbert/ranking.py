@@ -691,9 +691,9 @@ class ColBERTFactory(ColBERTModelOnlyFactory):
             return self.faiss_index
         faiss_index_pattern = get_faiss_index_name(self.args)  # This should return something like 'ivfpq'
         faiss_index_files = glob.glob(os.path.join(self.index_path, f"{faiss_index_pattern}.*.faiss"))
+        print('-'*10 + '\n' + faiss_index_files + '\n'+ '-'*10)
         if not faiss_index_files:
             raise ValueError(f"No FAISS index found matching pattern {faiss_index_pattern}.*.faiss in {self.index_path}")
-        print('-'*10 + '\n' + faiss_index_files + '\n'+ '-'*10)
         faiss_index_path = faiss_index_files[0]
         print('-'*10 + '\n' + faiss_index_path + '\n'+ '-'*10)
         self.faiss_index = FaissIndex(self.index_path, faiss_index_path, self.args.nprobe, self.args.part_range, mmap=self.faisstype == 'mmap')
