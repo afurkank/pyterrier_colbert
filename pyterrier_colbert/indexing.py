@@ -325,7 +325,7 @@ class ColBERTIndexer(pt.Indexer):
                 l["docid"] = docid
                 docnos.append(l['docno'])
                 docid+=1
-                yield l
+                yield l              
         self.args.generator = convert_gen(iterator)
         ceg = CollectionEncoderIds(self.args,0,1) if self.ids else CollectionEncoder_Generator(self.args,0,1)
 
@@ -333,7 +333,7 @@ class ColBERTIndexer(pt.Indexer):
         create_directory(self.args.index_path)
         ceg.encode()
         self.colbert = ceg.colbert
-        self.checkpoint = ceg.checkpoint
+        self.checkpoint = ceg.checkpoint 
 
         assert os.path.exists(self.args.index_path), self.args.index_path
         num_embeddings = sum(load_doclens(self.args.index_path))
@@ -346,7 +346,6 @@ class ColBERTIndexer(pt.Indexer):
         if self.args.partitions is None:
             self.args.partitions = 1 << math.ceil(math.log2(8 * math.sqrt(num_embeddings)))
             warn(f"Number of partitions for FAISS index is not specified\nDefaulting to {self.args.partitions} which is calculated by the following formula: 1 << math.ceil(math.log2(8 * math.sqrt(num_embeddings)))")
-        
         index_faiss(self.args)
         print("#> Faiss encoding complete")
         endtime = timer()
