@@ -345,7 +345,7 @@ class ColBERTIndexer(pt.Indexer):
 
         if self.args.partitions is None:
             self.args.partitions = 1 << math.ceil(math.log2(8 * math.sqrt(num_embeddings)))
-            warn(f"Number of partitions for FAISS index is not specified, defaulting to {self.args.partitions}")
+            warn(f"Number of partitions for FAISS index is not specified\nDefaulting to {self.args.partitions} which is calculated by the following formula: 1 << math.ceil(math.log2(8 * math.sqrt(num_embeddings)))")
         
         index_faiss(self.args)
         print("#> Faiss encoding complete")
