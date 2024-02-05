@@ -694,6 +694,8 @@ class ColBERTFactory(ColBERTModelOnlyFactory):
         faiss_index_files = glob.glob(os.path.join(self.index_path, f"{index_name}*.faiss"))
         if not faiss_index_files:
             raise ValueError(f"No FAISS index found matching pattern {index_name}*.faiss in {self.index_path}")
+        if len(faiss_index_files) > 1:
+            warn(f"More than one FAISS index file matching the pattern {index_name}*.faiss found in {self.index_path}, choosing the first one..")
         faiss_index_path = faiss_index_files[0] # choose the first index file that matches the pattern
         self.faiss_index = FaissIndex(self.index_path, faiss_index_path, self.args.nprobe, self.args.part_range, mmap=self.faisstype == 'mmap')
         # ensure the faiss_index is transferred to GPU memory for speed
