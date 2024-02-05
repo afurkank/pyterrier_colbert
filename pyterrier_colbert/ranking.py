@@ -689,11 +689,11 @@ class ColBERTFactory(ColBERTModelOnlyFactory):
         from colbert.ranking.faiss_index import FaissIndex
         if self.faiss_index is not None:
             return self.faiss_index
-        faiss_index_pattern = get_faiss_index_name(self.args)  # This should return something like 'ivfpq.faiss'
-        index_name = faiss_index_pattern.split('.')[0]
+        faiss_index_name = get_faiss_index_name(self.args)  # This should return something like 'ivfpq.faiss'
+        index_name = faiss_index_name.split('.')[0]
         faiss_index_files = glob.glob(os.path.join(self.index_path, f"{index_name}*.faiss"))
         if not faiss_index_files:
-            raise ValueError(f"No FAISS index found matching pattern {faiss_index_pattern}*.faiss in {self.index_path}")
+            raise ValueError(f"No FAISS index found matching pattern {index_name}*.faiss in {self.index_path}")
         faiss_index_path = faiss_index_files[0] # choose the first index file that matches the pattern
         self.faiss_index = FaissIndex(self.index_path, faiss_index_path, self.args.nprobe, self.args.part_range, mmap=self.faisstype == 'mmap')
         # ensure the faiss_index is transferred to GPU memory for speed
