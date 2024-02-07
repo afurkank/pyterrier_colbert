@@ -945,7 +945,9 @@ class ColBERTFactory(ColBERTModelOnlyFactory):
                     #NB: ids is 2D
                     qweights = torch.ones(ids.shape)
                 
+                # retrieve faiss_depth=1000 most similar doc embeddings
                 all_scores, all_embedding_ids = self._faiss_index().faiss_index.search(Q_cpu_numpy, faiss_depth)
+
                 nonlocal score_buffer
                 # we reuse this buffer, but it has to be big enough for expanded queries
                 if score_buffer.shape[1] < Q_cpu_numpy.shape[0]:
@@ -955,7 +957,6 @@ class ColBERTFactory(ColBERTModelOnlyFactory):
 
                 for offset in range(pids.shape[0]):
                     rtr.append([qid, row.query, pids[offset], final_scores[offset], ids[0], Q_cpu, qweights[0]])
-                    
 
             rtr = pd.DataFrame(rtr, columns=["qid","query",'docid', 'score','query_toks','query_embs', 'query_weights'])
             if add_docnos:
@@ -1073,5 +1074,24 @@ def _approx_maxsim_numpy(faiss_scores, faiss_ids, mapping, weights, score_buffer
     final = np.sum(score_buffer[all_pids, : ] * weights, axis=1)
     # reset the score_buffer for the processed documents to zero
     score_buffer[all_pids, : ] = 0
+
+    """
+    The below part shuffles passage ids and their corresponding scores
+    before returning them. Hopefully, this correctly investigates the
+    effect of document orderings on retrieval effectiveness(especially for small
+    datasets such as Vaswani).
+    """
+
+    # Combine `all_pids` and `final` into a single list of tuples
+    combined = list(zip(all_pids, final))
+
+    # Shuffle the combined lists
+    np.random.shuffle(combined)
+
+    # Separate the shuffled structure back into `all_pids` and `final`
+    all_pids, final = zip(*combined)
+    # Convert them back to numpy arrays(might be redundant)
+    all_pids = np.array(all_pids)
+    final = np.array(final)
 
     return all_pids, final
