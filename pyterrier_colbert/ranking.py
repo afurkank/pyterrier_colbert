@@ -510,10 +510,10 @@ class ColBERTModelOnlyFactory():
                 # Q: (32, 128)
 
                 # Q @ D.permute(0,2,1) = (32, 128) x (N, 128, 180) = (N, 32, 180)
-                # maxscoreQ = (N, 32, )
-                # scores = (N, )
-                maxscoreQ = (Q @ D.permute(0, 2, 1)).max(2).values
+                maxscoreQ = (Q @ D.permute(0, 2, 1)).max(2).values # maxscoreQ = (N, 32, )
+                # scores = maxscoreQ.sum(1) = (N, )
                 scores = (weightsQ*maxscoreQ).sum(1).cpu()
+                print(scores.shape)
                 df["score"] = scores.tolist()
                 if add_contributions:
                     contributions = (Q @ D.permute(0, 2, 1)).max(1).values.cpu()
@@ -1082,7 +1082,7 @@ def _approx_maxsim_numpy(faiss_scores, faiss_ids, mapping, weights, score_buffer
     datasets such as Vaswani).
     """
 
-    # Combine `all_pids` and `final` into a single list of tuples
+    """# Combine `all_pids` and `final` into a single list of tuples
     combined = list(zip(all_pids, final))
 
     # Shuffle the combined lists
@@ -1092,6 +1092,6 @@ def _approx_maxsim_numpy(faiss_scores, faiss_ids, mapping, weights, score_buffer
     all_pids, final = zip(*combined)
     # Convert them back to numpy arrays(might be redundant)
     all_pids = np.array(all_pids)
-    final = np.array(final)
+    final = np.array(final)"""
 
     return all_pids, final
