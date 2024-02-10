@@ -512,9 +512,9 @@ class ColBERTModelOnlyFactory():
                 # Q @ D.permute(0,2,1) = (32, 128) x (N, 128, 180) = (N, 32, 180)
                 maxscoreQ = (Q @ D.permute(0, 2, 1)).max(2).values # maxscoreQ = (N, 32, )
                 # scores = maxscoreQ.sum(1) = (N, )
-                # N = 1000 for k'=1000
+                # N = 1000 for k'=1000(because we did "ann_retrieve_score % k1" at first stage retrieval)
                 scores = (weightsQ*maxscoreQ).sum(1).cpu()
-                print(scores.shape)
+                # print(scores.shape) this prints torch.Size([1000])
                 df["score"] = scores.tolist()
                 if add_contributions:
                     contributions = (Q @ D.permute(0, 2, 1)).max(1).values.cpu()
