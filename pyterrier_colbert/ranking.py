@@ -1124,6 +1124,7 @@ def _approx_maxsim_numpy(faiss_scores, faiss_ids, mapping, weights, score_buffer
     final = np.array(final)
     """
     if num_docs_to_shuffle:
+        print(f"Shuffling top {num_docs_to_shuffle} docs after first stage retrieval..")
         pids_to_shuffle = all_pids[:num_docs_to_shuffle]
         final_scores_to_shuffle = final[:num_docs_to_shuffle]
         # Combine `all_pids` and `final` into a single list of tuples
