@@ -908,6 +908,7 @@ class ColBERTFactory(ColBERTModelOnlyFactory):
             add_ranks=True,
             add_docnos=True,
             num_qembs_hint=32,
+            num_docs_to_shuffle=0,
             verbose_=False
         ) -> pt.Transformer:
         """
@@ -971,7 +972,15 @@ class ColBERTFactory(ColBERTModelOnlyFactory):
                 if score_buffer.shape[1] < Q_cpu_numpy.shape[0]:
                   score_buffer = np.zeros( (len(self), Q_cpu_numpy.shape[0] ) )
                 
-                pids, final_scores = _approx_maxsim_numpy(all_scores, all_embedding_ids, self.faiss_index.emb2pid.numpy(), qweights[0].numpy(), score_buffer, verbose_)
+                pids, final_scores = _approx_maxsim_numpy(
+                    all_scores, 
+                    all_embedding_ids, 
+                    self.faiss_index.emb2pid.numpy(), 
+                    qweights[0].numpy(), 
+                    score_buffer, 
+                    num_docs_to_shuffle,
+                    verbose_
+                )
 
                 for offset in range(pids.shape[0]):
                     rtr.append([qid, row.query, pids[offset], final_scores[offset], ids[0], Q_cpu, qweights[0]])
@@ -1049,7 +1058,7 @@ class ColBERTFactory(ColBERTModelOnlyFactory):
 
 import pandas as pd
 
-def _approx_maxsim_numpy(faiss_scores, faiss_ids, mapping, weights, score_buffer, verbose=False):
+def _approx_maxsim_numpy(faiss_scores, faiss_ids, mapping, weights, score_buffer, verbose=False, num_docs_to_shuffle=0):
     """
     Compute the approximate maximum similarity scores for each query-document pair using numpy.
 
@@ -1086,14 +1095,14 @@ def _approx_maxsim_numpy(faiss_scores, faiss_ids, mapping, weights, score_buffer
     
     all_pids = np.unique(pids) # ids of the processed documents
     if verbose:
-        print("all_pids.shape: ", all_pids.shape)
+        print("all_pids.shape: ", all_pids.shape) # (N,) where N is number of unique documents retrieved at first stage
     """
     compute the final scores by summing the maximum similarity scores 
     for each document, weighted by the query weights
     """
     final = np.sum(score_buffer[all_pids, : ] * weights, axis=1)
     if verbose:
-        print("final.shape: ", final.shape)
+        print("final.shape: ", final.shape) # (N,) - same shape as all_pids
     # reset the score_buffer for the processed documents to zero
     score_buffer[all_pids, : ] = 0
 
@@ -1102,9 +1111,7 @@ def _approx_maxsim_numpy(faiss_scores, faiss_ids, mapping, weights, score_buffer
     before returning them. Hopefully, this correctly investigates the
     effect of document orderings on retrieval effectiveness(especially for small
     datasets such as Vaswani).
-    """
-
-    """# Combine `all_pids` and `final` into a single list of tuples
+    # Combine `all_pids` and `final` into a single list of tuples
     combined = list(zip(all_pids, final))
 
     # Shuffle the combined lists
@@ -1114,6 +1121,21 @@ def _approx_maxsim_numpy(faiss_scores, faiss_ids, mapping, weights, score_buffer
     all_pids, final = zip(*combined)
     # Convert them back to numpy arrays(might be redundant)
     all_pids = np.array(all_pids)
-    final = np.array(final)"""
+    final = np.array(final)
+    """
+    if num_docs_to_shuffle is not 0:
+        pids_to_shuffle = all_pids[:num_docs_to_shuffle, :]
+        final_scores_to_shuffle = final[:num_docs_to_shuffle, :]
+        # Combine `all_pids` and `final` into a single list of tuples
+        combined = list(zip(pids_to_shuffle, final_scores_to_shuffle))
+
+        # Shuffle the combined lists
+        np.random.shuffle(combined)
+
+        # Separate the shuffled structure back into `all_pids` and `final`
+        all_pids[:num_docs_to_shuffle, :], final[:num_docs_to_shuffle, :] = zip(*combined)
+        # Convert them back to numpy arrays(might be redundant)
+        all_pids = np.array(all_pids)
+        final = np.array(final)
 
     return all_pids, final
