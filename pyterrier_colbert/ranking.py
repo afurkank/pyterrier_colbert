@@ -978,8 +978,8 @@ class ColBERTFactory(ColBERTModelOnlyFactory):
                     self.faiss_index.emb2pid.numpy(), 
                     qweights[0].numpy(), 
                     score_buffer, 
-                    num_docs_to_shuffle,
-                    verbose_
+                    verbose=verbose_,
+                    num_docs_to_shuffle=num_docs_to_shuffle,
                 )
 
                 for offset in range(pids.shape[0]):
@@ -1119,7 +1119,7 @@ def _approx_maxsim_numpy(faiss_scores, faiss_ids, mapping, weights, score_buffer
 
     # Separate the shuffled structure back into `all_pids` and `final`
     all_pids, final = zip(*combined)
-    # Convert them back to numpy arrays(might be redundant)
+    # Convert them back to numpy arrays
     all_pids = np.array(all_pids)
     final = np.array(final)
     """
@@ -1135,6 +1135,7 @@ def _approx_maxsim_numpy(faiss_scores, faiss_ids, mapping, weights, score_buffer
         # Separate the shuffled structure back into `all_pids` and `final`
         all_pids[:num_docs_to_shuffle], final[:num_docs_to_shuffle] = zip(*combined)
         
+        # Convert them back to numpy arrays
         all_pids = np.array(all_pids)
         final = np.array(final)
     return all_pids, final
