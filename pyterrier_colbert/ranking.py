@@ -1086,14 +1086,14 @@ def _approx_maxsim_numpy(faiss_scores, faiss_ids, mapping, weights, score_buffer
     
     all_pids = np.unique(pids) # ids of the processed documents
     if verbose:
-        print("all_pids.shape: ", all_pids)
+        print("all_pids.shape: ", all_pids.shape)
     """
     compute the final scores by summing the maximum similarity scores 
     for each document, weighted by the query weights
     """
     final = np.sum(score_buffer[all_pids, : ] * weights, axis=1)
     if verbose:
-        print("final.shape: ", final)
+        print("final.shape: ", final.shape)
     # reset the score_buffer for the processed documents to zero
     score_buffer[all_pids, : ] = 0
 
