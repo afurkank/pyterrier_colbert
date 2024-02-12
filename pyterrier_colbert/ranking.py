@@ -1124,8 +1124,8 @@ def _approx_maxsim_numpy(faiss_scores, faiss_ids, mapping, weights, score_buffer
     final = np.array(final)
     """
     if num_docs_to_shuffle is not 0:
-        pids_to_shuffle = all_pids[:num_docs_to_shuffle, :]
-        final_scores_to_shuffle = final[:num_docs_to_shuffle, :]
+        pids_to_shuffle = all_pids[:num_docs_to_shuffle]
+        final_scores_to_shuffle = final[:num_docs_to_shuffle]
         # Combine `all_pids` and `final` into a single list of tuples
         combined = list(zip(pids_to_shuffle, final_scores_to_shuffle))
 
@@ -1133,9 +1133,6 @@ def _approx_maxsim_numpy(faiss_scores, faiss_ids, mapping, weights, score_buffer
         np.random.shuffle(combined)
 
         # Separate the shuffled structure back into `all_pids` and `final`
-        all_pids[:num_docs_to_shuffle, :], final[:num_docs_to_shuffle, :] = zip(*combined)
-        # Convert them back to numpy arrays(might be redundant)
-        all_pids = np.array(all_pids)
-        final = np.array(final)
+        all_pids[:num_docs_to_shuffle], final[:num_docs_to_shuffle] = zip(*combined)
 
     return all_pids, final
