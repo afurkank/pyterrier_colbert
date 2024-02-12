@@ -496,25 +496,31 @@ class ColBERTModelOnlyFactory():
                     weightsQ = torch.ones(Q.shape[0])
                 if gpu:
                     Q = Q.cuda()
-                    weightsQ = weightsQ.cuda()        
+                    weightsQ = weightsQ.cuda()
+                
                 D = torch.zeros(len(df), factory.args.doc_maxlen, factory.args.dim, device=cuda0)
+                
                 # D: (num_documents, doc_len, emb_dim)
                 # D: (N, 180, 128)
+                # N is equal to k'(the number of documents to retrieve in the first stage)
+                # k' comes from the line `ann_retrieve_score % k1`
+
                 df['row_index'] = range(len(df))
                 if verbose:
                     pt.tqdm.pandas(desc='scorer')
                     df.progress_apply(lambda row: _build_interaction(row, D), axis=1)
                 else:
                     df.apply(lambda row: _build_interaction(row, D), axis=1)
+                
                 # Q: (query_len, emb_dim)
                 # Q: (32, 128)
+                # D: (k', 180, 128)
 
-                # Q @ D.permute(0,2,1) = (32, 128) x (N, 128, 180) = (N, 32, 180)
+                # Q @ D.permute(0,2,1) = (32, 128) x (k', 128, 180) = (k', 32, 180)
                 maxscoreQ = (Q @ D.permute(0, 2, 1)).max(2).values # maxscoreQ = (N, 32, )
-                # scores = maxscoreQ.sum(1) = (N, )
-                # N = 1000 for k'=1000(because we did "ann_retrieve_score % k1" at first stage retrieval)
+                # scores = maxscoreQ.sum(1) = (k', )
                 scores = (weightsQ*maxscoreQ).sum(1).cpu()
-                # print(scores.shape) this prints torch.Size([1000])
+                # print(scores.shape) this prints torch.Size([1000]) when k1 = 1000
                 df["score"] = scores.tolist()
                 if add_contributions:
                     contributions = (Q @ D.permute(0, 2, 1)).max(1).values.cpu()
@@ -892,9 +898,20 @@ class ColBERTFactory(ColBERTModelOnlyFactory):
         #output: qid, query, docno, score
         return self.set_retrieve() >> self.index_scorer(query_encoded=True)
 
-    def ann_retrieve_score(self, batch=False, query_encoded=False, faiss_depth=1000, verbose=False, maxsim=True, add_ranks=True, add_docnos=True, num_qembs_hint=32) -> pt.Transformer:
+    def ann_retrieve_score(
+            self,
+            batch=False,
+            query_encoded=False,
+            faiss_depth=1000,
+            verbose=False,
+            maxsim=True,
+            add_ranks=True,
+            add_docnos=True,
+            num_qembs_hint=32,
+            verbose_=False
+        ) -> pt.Transformer:
         """
-        ------------ UPDATED COLBERT ----------------
+        ------------ UPDATED COLBERT(from the paper below) ----------------
         Like set_retrieve(), uses the ColBERT FAISS index to retrieve documents, but scores them using the maxsim on the approximate (quantised) nearest neighbour scores. 
 
         Parameters:
@@ -954,7 +971,7 @@ class ColBERTFactory(ColBERTModelOnlyFactory):
                 if score_buffer.shape[1] < Q_cpu_numpy.shape[0]:
                   score_buffer = np.zeros( (len(self), Q_cpu_numpy.shape[0] ) )
                 
-                pids, final_scores = _approx_maxsim_numpy(all_scores, all_embedding_ids, self.faiss_index.emb2pid.numpy(), qweights[0].numpy(), score_buffer)
+                pids, final_scores = _approx_maxsim_numpy(all_scores, all_embedding_ids, self.faiss_index.emb2pid.numpy(), qweights[0].numpy(), score_buffer, verbose_)
 
                 for offset in range(pids.shape[0]):
                     rtr.append([qid, row.query, pids[offset], final_scores[offset], ids[0], Q_cpu, qweights[0]])
@@ -1032,7 +1049,7 @@ class ColBERTFactory(ColBERTModelOnlyFactory):
 
 import pandas as pd
 
-def _approx_maxsim_numpy(faiss_scores, faiss_ids, mapping, weights, score_buffer):
+def _approx_maxsim_numpy(faiss_scores, faiss_ids, mapping, weights, score_buffer, verbose=False):
     """
     Compute the approximate maximum similarity scores for each query-document pair using numpy.
 
@@ -1068,11 +1085,15 @@ def _approx_maxsim_numpy(faiss_scores, faiss_ids, mapping, weights, score_buffer
         score_buffer[rank_pids, qemb_ids] = np.maximum(score_buffer[rank_pids, qemb_ids], faiss_scores[:, rank])
     
     all_pids = np.unique(pids) # ids of the processed documents
+    if verbose:
+        print("all_pids.shape: ", all_pids)
     """
     compute the final scores by summing the maximum similarity scores 
     for each document, weighted by the query weights
     """
     final = np.sum(score_buffer[all_pids, : ] * weights, axis=1)
+    if verbose:
+        print("final.shape: ", final)
     # reset the score_buffer for the processed documents to zero
     score_buffer[all_pids, : ] = 0
 
