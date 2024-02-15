@@ -1103,6 +1103,7 @@ def _approx_maxsim_numpy(faiss_scores, faiss_ids, mapping, weights, score_buffer
     final = np.sum(score_buffer[all_pids, : ] * weights, axis=1)
     if verbose:
         print("final.shape: ", final.shape) # (N,) - same shape as all_pids
+    
     # reset the score_buffer for the processed documents to zero
     score_buffer[all_pids, : ] = 0
 
@@ -1127,6 +1128,8 @@ def _approx_maxsim_numpy(faiss_scores, faiss_ids, mapping, weights, score_buffer
         print(f"Shuffling top {num_docs_to_shuffle} docs after first stage retrieval..")
         pids_to_shuffle = all_pids[:num_docs_to_shuffle]
         final_scores_to_shuffle = final[:num_docs_to_shuffle]
+        if verbose:
+            print("*"*10 + "final_scores_to_shuffle:" + "*"*10 + "\n" + f"{final_scores_to_shuffle}")
         # Combine `all_pids` and `final` into a single list of tuples
         combined = list(zip(pids_to_shuffle, final_scores_to_shuffle))
 
