@@ -1144,9 +1144,9 @@ def _approx_maxsim_numpy(faiss_scores, faiss_ids, mapping, weights, score_buffer
         final = np.array(final)
     return all_pids, final"""
 
-    num_pids = all_pids.shape[0]
+    """num_pids = all_pids.shape[0]
     if num_docs_to_shuffle > num_pids:
-        raise ValueError(f"Can not shuffle more documents({num_docs_to_shuffle}) than num_pids({num_pids})")
+        raise ValueError(f"Can not shuffle more documents({num_docs_to_shuffle}) than num_pids({num_pids})")"""
 
     #if num_docs_to_shuffle:
     combined = list(zip(all_pids, final))
