@@ -1124,7 +1124,7 @@ def _approx_maxsim_numpy(faiss_scores, faiss_ids, mapping, weights, score_buffer
     all_pids = np.array(all_pids)
     final = np.array(final)
     """
-    if num_docs_to_shuffle:
+    """if num_docs_to_shuffle:
         print(f"Shuffling top {num_docs_to_shuffle} docs after first stage retrieval..")
         pids_to_shuffle = all_pids[:num_docs_to_shuffle]
         final_scores_to_shuffle = final[:num_docs_to_shuffle]
@@ -1142,4 +1142,20 @@ def _approx_maxsim_numpy(faiss_scores, faiss_ids, mapping, weights, score_buffer
         # Convert them back to numpy arrays
         all_pids = np.array(all_pids)
         final = np.array(final)
+    return all_pids, final"""
+
+    num_pids = all_pids.shape[0]
+    if num_docs_to_shuffle > num_pids:
+        raise ValueError(f"Can not shuffle more documents({num_docs_to_shuffle}) than num_pids({num_pids})")
+
+    #if num_docs_to_shuffle:
+    combined = list(zip(all_pids, final))
+
+    np.random.shuffle(combined)
+
+    all_pids, final = zip(*combined)
+
+    all_pids = np.array(all_pids)
+    final = np.array(final)
+    
     return all_pids, final
