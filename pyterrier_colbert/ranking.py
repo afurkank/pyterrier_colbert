@@ -908,8 +908,9 @@ class ColBERTFactory(ColBERTModelOnlyFactory):
             add_ranks=True,
             add_docnos=True,
             num_qembs_hint=32,
-            num_docs_to_shuffle=0,
-            verbose_=False
+            print_pids_and_final_info=False,
+            shuffle_docs: bool = False,
+            print_final_scores: bool = False
         ) -> pt.Transformer:
         """
         ------------ UPDATED COLBERT(from the paper below) ----------------
@@ -978,14 +979,15 @@ class ColBERTFactory(ColBERTModelOnlyFactory):
                     self.faiss_index.emb2pid.numpy(), 
                     qweights[0].numpy(), 
                     score_buffer, 
-                    verbose=verbose_,
-                    num_docs_to_shuffle=num_docs_to_shuffle,
+                    verbose = print_pids_and_final_info,
+                    shuffle_docs = shuffle_docs,
+                    print_final_scores = print_final_scores
                 )
-
                 for offset in range(pids.shape[0]):
                     rtr.append([qid, row.query, pids[offset], final_scores[offset], ids[0], Q_cpu, qweights[0]])
 
             rtr = pd.DataFrame(rtr, columns=["qid","query",'docid', 'score','query_toks','query_embs', 'query_weights'])
+            #print("-----------rtr after approx_maxsim_numpy: ", rtr)
             if add_docnos:
                 rtr = self._add_docnos(rtr)
             if add_ranks:
@@ -1058,7 +1060,15 @@ class ColBERTFactory(ColBERTModelOnlyFactory):
 
 import pandas as pd
 
-def _approx_maxsim_numpy(faiss_scores, faiss_ids, mapping, weights, score_buffer, verbose=False, num_docs_to_shuffle=0):
+def _approx_maxsim_numpy(
+        faiss_scores, 
+        faiss_ids, 
+        mapping, 
+        weights, 
+        score_buffer, 
+        verbose=False, 
+        shuffle_docs : bool = False, 
+        print_final_scores : bool = False):
     """
     Compute the approximate maximum similarity scores for each query-document pair using numpy.
 
@@ -1092,51 +1102,33 @@ def _approx_maxsim_numpy(faiss_scores, faiss_ids, mapping, weights, score_buffer
     for rank in range(faiss_depth):
         rank_pids = pids[:, rank]
         score_buffer[rank_pids, qemb_ids] = np.maximum(score_buffer[rank_pids, qemb_ids], faiss_scores[:, rank])
-    
+    if verbose:
+        print("pids.shape: ", pids.shape)
     all_pids = np.unique(pids) # ids of the processed documents
     if verbose:
         print("all_pids.shape: ", all_pids.shape) # (N,) where N is number of unique documents retrieved at first stage
     """
-    compute the final scores by summing the maximum similarity scores 
-    for each document, weighted by the query weights
+    compute the final scores by summing the maximum similarity scores for each document, 
+    weighted by the query weights
     """
     final = np.sum(score_buffer[all_pids, : ] * weights, axis=1)
     if verbose:
         print("final.shape: ", final.shape) # (N,) - same shape as all_pids
+    if print_final_scores:
+        print("final: \n", final)
     # reset the score_buffer for the processed documents to zero
     score_buffer[all_pids, : ] = 0
 
-    """
-    The below part shuffles passage ids and their corresponding scores
-    before returning them. Hopefully, this correctly investigates the
-    effect of document orderings on retrieval effectiveness(especially for small
-    datasets such as Vaswani).
-    # Combine `all_pids` and `final` into a single list of tuples
-    combined = list(zip(all_pids, final))
+    if shuffle_docs:
+        if verbose:
+            print("all_pids before shuffling: ", all_pids)
+        # Generate shuffled indices
+        indices = np.arange(len(all_pids))
+        np.random.shuffle(indices)
 
-    # Shuffle the combined lists
-    np.random.shuffle(combined)
-
-    # Separate the shuffled structure back into `all_pids` and `final`
-    all_pids, final = zip(*combined)
-    # Convert them back to numpy arrays
-    all_pids = np.array(all_pids)
-    final = np.array(final)
-    """
-    if num_docs_to_shuffle:
-        print(f"Shuffling top {num_docs_to_shuffle} docs after first stage retrieval..")
-        pids_to_shuffle = all_pids[:num_docs_to_shuffle]
-        final_scores_to_shuffle = final[:num_docs_to_shuffle]
-        # Combine `all_pids` and `final` into a single list of tuples
-        combined = list(zip(pids_to_shuffle, final_scores_to_shuffle))
-
-        # Shuffle the combined lists
-        np.random.shuffle(combined)
-
-        # Separate the shuffled structure back into `all_pids` and `final`
-        all_pids[:num_docs_to_shuffle], final[:num_docs_to_shuffle] = zip(*combined)
-        
-        # Convert them back to numpy arrays
-        all_pids = np.array(all_pids)
-        final = np.array(final)
+        # Use indices to reorder arrays
+        all_pids = all_pids[indices]
+        final = final[indices]
+        if verbose:
+            print("all_pids after shuffling: ", all_pids)
     return all_pids, final
