@@ -515,7 +515,12 @@ class ColBERTModelOnlyFactory():
                 # Q: (query_len, emb_dim)
                 # Q: (32, 128)
                 # D: (k', 180, 128)
-
+                """print("-"*50)
+                print("Q.shape: ", Q.shape)
+                print("Q: \n", Q)
+                print("D.shape: ", D.shape)
+                print("D: \n", D)
+                print("-"*50)"""
                 # Q @ D.permute(0,2,1) = (32, 128) x (k', 128, 180) = (k', 32, 180)
                 maxscoreQ = (Q @ D.permute(0, 2, 1)).max(2).values # maxscoreQ = (N, 32, )
                 # scores = maxscoreQ.sum(1) = (k', )
