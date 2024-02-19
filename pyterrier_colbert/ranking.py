@@ -938,18 +938,27 @@ class ColBERTFactory(ColBERTModelOnlyFactory):
         assert hasattr(self._faiss_index(), 'faiss_index'), "multi index support removed"
         assert maxsim, "only maxsim supported now."
 
-        # this is a big malloc, sized for the number of docs in the collection
-        # for this reason, we reuse it across queries. All used values are reset
+        print("First stage retrieval is running..")
+        print("ann_retrieve_score() is called..")
+        
+        # This is a big malloc, sized for the number of docs in the collection.
+        # For this reason, we reuse it across queries. All used values are reset
         # to zero afer use.
         import numpy as np
         score_buffer = np.zeros( (len(self), num_qembs_hint ) )
+
+        print("score_buffer initialized to zeros.. score_buffer.shape: ", score_buffer.shape)
+        # score_buffer: (11429, 32) for Vaswani(num of docs in Vaswani dataset is 11429)
 
         def _single_retrieve(queries_df):
             rtr = []
             weights_set = "query_weights" in queries_df.columns
             iter = queries_df.itertuples()
             iter = tqdm(iter, unit="q") if verbose else iter
+
             for row in iter:
+                print("row: ", row)
+                # row is a pandas dataframe that includes the columns ('qid', 'query', 'query_embs', 'query_toks')
                 qid = row.qid
                 if query_encoded:
                     embs = row.query_embs
@@ -970,35 +979,50 @@ class ColBERTFactory(ColBERTModelOnlyFactory):
                     #NB: ids is 2D
                     qweights = torch.ones(ids.shape)
                 
+                print(f"Query is encoded.. Q_cpu_numpy.shape: {Q_cpu_numpy.shape}") # (32, 128)
+                
                 # retrieve faiss_depth=1000 most similar doc embeddings
+                print(f"Retrieving faiss_depth({faiss_depth}) most similar doc embeddings from faiss index..") # 1000
+                
                 all_scores, all_embedding_ids = self._faiss_index().faiss_index.search(Q_cpu_numpy, faiss_depth)
+                print("all_scores.shape: ", all_scores.shape, "\nall_embedding_ids: ", all_embedding_ids.shape)
+                # all_scores: (32, 1000)
+                # all_embedding_ids: (32, 1000)
 
                 nonlocal score_buffer
                 # we reuse this buffer, but it has to be big enough for expanded queries
                 if score_buffer.shape[1] < Q_cpu_numpy.shape[0]:
                   score_buffer = np.zeros( (len(self), Q_cpu_numpy.shape[0] ) )
                 
+                print("emb2pid.shape: ", self.faiss_index.emb2pid.numpy().shape) # (581496,) for Vaswani
+                
                 pids, final_scores = _approx_maxsim_numpy(
-                    all_scores, 
-                    all_embedding_ids, 
-                    self.faiss_index.emb2pid.numpy(), 
-                    qweights[0].numpy(), 
-                    score_buffer, 
+                    all_scores, # similarity score between query embeddings and 1000 doc embs returned by faiss
+                    all_embedding_ids, # ids of doc embs returned by faiss
+                    self.faiss_index.emb2pid.numpy(), # embeddings to passage id mapping, (581496,)
+                    qweights[0].numpy(), # ones
+                    score_buffer, # (11429, 32) -> holds the similarity score between a passage and a query emb
                     verbose = print_pids_and_final_info,
                     shuffle_docs = shuffle_docs,
                     print_final_scores = print_final_scores
                 )
+                
                 for offset in range(pids.shape[0]):
                     rtr.append([qid, row.query, pids[offset], final_scores[offset], ids[0], Q_cpu, qweights[0]])
 
             rtr = pd.DataFrame(rtr, columns=["qid","query",'docid', 'score','query_toks','query_embs', 'query_weights'])
             #print("-----------rtr after approx_maxsim_numpy: ", rtr)
+            
             if add_docnos:
                 rtr = self._add_docnos(rtr)
+            
             if add_ranks:
                 rtr = pt.model.add_ranks(rtr)
+            
             return rtr
+        
         t = pt.apply.by_query(_single_retrieve, add_ranks=False, verbose=verbose)
+        
         import types
         def __reduce_ex__(t2, proto):
             kwargs = { 'batch':batch, 'query_encoded': query_encoded, 'faiss_depth' : faiss_depth, 'maxsim': maxsim}
@@ -1066,11 +1090,11 @@ class ColBERTFactory(ColBERTModelOnlyFactory):
 import pandas as pd
 
 def _approx_maxsim_numpy(
-        faiss_scores, 
-        faiss_ids, 
-        mapping, 
-        weights, 
-        score_buffer, 
+        faiss_scores, # similarity score between query embeddings and 1000 doc embs returned by faiss, (32, 1000)
+        faiss_ids, # ids of doc embs returned by faiss, (32, 1000)
+        mapping, # embeddings to passage id mapping, (581496,)
+        weights, # ones
+        score_buffer, # (11429, 32) -> holds the similarity score between a passage and a query emb
         verbose=False, 
         shuffle_docs : bool = False, 
         print_final_scores : bool = False):
@@ -1092,41 +1116,62 @@ def _approx_maxsim_numpy(
         tuple: A tuple containing the unique document IDs and the final similarity scores.
     """
     import numpy as np
+    
     # faiss_depth: the number of documents returned by the FAISS index for each query
     faiss_depth = faiss_scores.shape[1]
+    
     # pids: mapping the document ids returned by the FAISS index to the ids in the original document collection
     pids = mapping[faiss_ids]
+    print("pids.shape: ", pids.shape) #  (32, 1000)
+    
     # qemb_ids: ids of the queries
     qemb_ids = np.arange(faiss_ids.shape[0])
+    
     """
     iterate over the ranks of the documents returned by the FAISS index
     
     for each rank, update the score_buffer to contain the maximum similarity 
     score for each query and document pair
     """
-    for rank in range(faiss_depth):
-        rank_pids = pids[:, rank]
+    for rank in range(faiss_depth): # rank = 0 -> 999
+        rank_pids = pids[:, rank] # for all query embeddings, get doc id of best matching doc emb
+        #print("-"*40)
+        #print("rank: ", rank)
+        #print("rank_pids.shape:",rank_pids.shape) # (32,)
+        #print("rank_pids:\n",rank_pids)
+        #print(f"score_buffer[rank_pids, qemb_ids]:\n",score_buffer[rank_pids, qemb_ids])
+        #print(f"faiss_scores[:, rank]:\n",faiss_scores[:, rank])
         score_buffer[rank_pids, qemb_ids] = np.maximum(score_buffer[rank_pids, qemb_ids], faiss_scores[:, rank])
+        #print(f"score_buffer[rank_pids, qemb_ids]:\n",score_buffer[rank_pids, qemb_ids])
+        #print("-"*40)
+    
     if verbose:
-        print("pids.shape: ", pids.shape)
+        print("pids.shape: ", pids.shape) # (32, 1000)
     all_pids = np.unique(pids) # ids of the processed documents
+    
     if verbose:
-        print("all_pids.shape: ", all_pids.shape) # (N,) where N is number of unique documents retrieved at first stage
+        # all_pids.shape -> (4140,) - varies by query
+        print("all_pids.shape: ", all_pids.shape) # ids of unique documents retrieved at first stage
+    
     """
     compute the final scores by summing the maximum similarity scores for each document, 
     weighted by the query weights
     """
     final = np.sum(score_buffer[all_pids, : ] * weights, axis=1)
+    
     if verbose:
-        print("final.shape: ", final.shape) # (N,) - same shape as all_pids
+        print("final.shape: ", final.shape) # (4140,) - same shape as all_pids
+    
     if print_final_scores:
         print("final: \n", final)
+    
     # reset the score_buffer for the processed documents to zero
     score_buffer[all_pids, : ] = 0
 
     if shuffle_docs:
         if verbose:
             print("all_pids before shuffling: ", all_pids)
+        
         # Generate shuffled indices
         indices = np.arange(len(all_pids))
         np.random.shuffle(indices)
@@ -1134,6 +1179,8 @@ def _approx_maxsim_numpy(
         # Use indices to reorder arrays
         all_pids = all_pids[indices]
         final = final[indices]
+        
         if verbose:
             print("all_pids after shuffling: ", all_pids)
+    
     return all_pids, final
