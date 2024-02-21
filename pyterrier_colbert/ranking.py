@@ -938,8 +938,8 @@ class ColBERTFactory(ColBERTModelOnlyFactory):
         assert hasattr(self._faiss_index(), 'faiss_index'), "multi index support removed"
         assert maxsim, "only maxsim supported now."
 
-        print("First stage retrieval is running..")
-        print("ann_retrieve_score() is called..")
+        #print("First stage retrieval is running..")
+        #print("ann_retrieve_score() is called..")
         
         # This is a big malloc, sized for the number of docs in the collection.
         # For this reason, we reuse it across queries. All used values are reset
@@ -947,7 +947,7 @@ class ColBERTFactory(ColBERTModelOnlyFactory):
         import numpy as np
         score_buffer = np.zeros( (len(self), num_qembs_hint ) )
 
-        print("score_buffer initialized to zeros.. score_buffer.shape: ", score_buffer.shape)
+        #print("score_buffer initialized to zeros.. score_buffer.shape: ", score_buffer.shape)
         # score_buffer: (11429, 32) for Vaswani(num of docs in Vaswani dataset is 11429)
 
         def _single_retrieve(queries_df):
@@ -957,7 +957,7 @@ class ColBERTFactory(ColBERTModelOnlyFactory):
             iter = tqdm(iter, unit="q") if verbose else iter
 
             for row in iter:
-                print("row: ", row)
+                #print("row: ", row)
                 # row is a pandas dataframe that includes the columns ('qid', 'query', 'query_embs', 'query_toks')
                 qid = row.qid
                 if query_encoded:
@@ -979,13 +979,14 @@ class ColBERTFactory(ColBERTModelOnlyFactory):
                     #NB: ids is 2D
                     qweights = torch.ones(ids.shape)
                 
-                print(f"Query is encoded.. Q_cpu_numpy.shape: {Q_cpu_numpy.shape}") # (32, 128)
+                #print(f"Query is encoded.. Q_cpu_numpy.shape: {Q_cpu_numpy.shape}") # (32, 128)
                 
+                
+                #print(f"Retrieving faiss_depth({faiss_depth}) most similar doc embeddings from faiss index..") # 1000
                 # retrieve faiss_depth=1000 most similar doc embeddings
-                print(f"Retrieving faiss_depth({faiss_depth}) most similar doc embeddings from faiss index..") # 1000
-                
                 all_scores, all_embedding_ids = self._faiss_index().faiss_index.search(Q_cpu_numpy, faiss_depth)
-                print("all_scores.shape: ", all_scores.shape, "\nall_embedding_ids: ", all_embedding_ids.shape)
+
+                #print("all_scores.shape: ", all_scores.shape, "\nall_embedding_ids: ", all_embedding_ids.shape)
                 # all_scores: (32, 1000)
                 # all_embedding_ids: (32, 1000)
 
@@ -994,7 +995,7 @@ class ColBERTFactory(ColBERTModelOnlyFactory):
                 if score_buffer.shape[1] < Q_cpu_numpy.shape[0]:
                   score_buffer = np.zeros( (len(self), Q_cpu_numpy.shape[0] ) )
                 
-                print("emb2pid.shape: ", self.faiss_index.emb2pid.numpy().shape) # (581496,) for Vaswani
+                #print("emb2pid.shape: ", self.faiss_index.emb2pid.numpy().shape) # (581496,) for Vaswani
                 
                 pids, final_scores = _approx_maxsim_numpy(
                     all_scores, # similarity score between query embeddings and 1000 doc embs returned by faiss
@@ -1118,23 +1119,25 @@ def _approx_maxsim_numpy(
     import numpy as np
     
     # faiss_depth: the number of documents returned by the FAISS index for each query
-    faiss_depth = faiss_scores.shape[1]
+    faiss_depth = faiss_scores.shape[1] # 1000
     
     # pids: mapping the document ids returned by the FAISS index to the ids in the original document collection
-    pids = mapping[faiss_ids]
-    print("pids.shape: ", pids.shape) #  (32, 1000)
+    pids = mapping[faiss_ids] #  (32, 1000)
+    #print("pids.shape: ", pids.shape)
     
     # qemb_ids: ids of the queries
-    qemb_ids = np.arange(faiss_ids.shape[0])
+    qemb_ids = np.arange(faiss_ids.shape[0]) # 0, 1, ..., 31
     
     """
     iterate over the ranks of the documents returned by the FAISS index
     
     for each rank, update the score_buffer to contain the maximum similarity 
     score for each query and document pair
+
+    IMPORTANT: here, we are still processing one query
     """
-    for rank in range(faiss_depth): # rank = 0 -> 999
-        rank_pids = pids[:, rank] # for all query embeddings, get doc id of best matching doc emb
+    for rank in range(faiss_depth): # rank = 0, 1, 2, ..., 999
+        rank_pids = pids[:, rank] # for all query embeddings, get passage id of doc emb at 'rank'
         #print("-"*40)
         #print("rank: ", rank)
         #print("rank_pids.shape:",rank_pids.shape) # (32,)
@@ -1146,9 +1149,9 @@ def _approx_maxsim_numpy(
         #print("-"*40)
     
     if verbose:
-        print("pids.shape: ", pids.shape) # (32, 1000)
-    all_pids = np.unique(pids) # ids of the processed documents
+        print("pids.shape: ", pids.shape) # (32, 1000) -> 32.000 pids in total
     
+    all_pids = np.unique(pids) # ids of the processed documents
     if verbose:
         # all_pids.shape -> (4140,) - varies by query
         print("all_pids.shape: ", all_pids.shape) # ids of unique documents retrieved at first stage
