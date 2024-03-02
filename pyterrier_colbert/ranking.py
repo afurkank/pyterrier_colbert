@@ -1138,15 +1138,21 @@ def _approx_maxsim_numpy(
     """
     for rank in range(faiss_depth): # rank = 0, 1, 2, ..., 999
         rank_pids = pids[:, rank] # for all query embeddings, get passage id of doc emb at 'rank'
-        #print("-"*40)
-        #print("rank: ", rank)
-        #print("rank_pids.shape:",rank_pids.shape) # (32,)
-        #print("rank_pids:\n",rank_pids)
-        #print(f"score_buffer[rank_pids, qemb_ids]:\n",score_buffer[rank_pids, qemb_ids])
-        #print(f"faiss_scores[:, rank]:\n",faiss_scores[:, rank])
+        """print("-"*40)
+        print("rank: ", rank)
+        print("rank_pids.shape:",rank_pids.shape) # (32,)
+        print("rank_pids:\n",rank_pids)
+        print("qemb_ids.shape:",qemb_ids.shape) # (32,)
+        print("qemb_ids:\n",qemb_ids)
+        print("score_buffer[rank_pids].shape:",score_buffer[rank_pids].shape) # (32, 32)
+        print("score_buffer[rank_pids]:",score_buffer[rank_pids])
+        print("score_buffer[rank_pids, qemb_ids].shape:",score_buffer[rank_pids, qemb_ids].shape) # (32,)
+        print("score_buffer[rank_pids, qemb_ids]:\n",score_buffer[rank_pids, qemb_ids])
+        print("faiss_scores[:, rank].shape:",faiss_scores[:, rank].shape) # (32,)
+        print("faiss_scores[:, rank]:\n",faiss_scores[:, rank])"""
         score_buffer[rank_pids, qemb_ids] = np.maximum(score_buffer[rank_pids, qemb_ids], faiss_scores[:, rank])
-        #print(f"score_buffer[rank_pids, qemb_ids]:\n",score_buffer[rank_pids, qemb_ids])
-        #print("-"*40)
+        """print("score_buffer[rank_pids, qemb_ids]:\n",score_buffer[rank_pids, qemb_ids])
+        print("-"*40)"""
     
     if verbose:
         print("pids.shape: ", pids.shape) # (32, 1000) -> 32.000 pids in total
